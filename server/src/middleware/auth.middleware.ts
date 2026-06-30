@@ -1,20 +1,18 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
+import User, { IUser } from "../models/User";
 
 export interface AuthRequest extends Request {
-  user?: {
-    id: string;
-    role: string;
-  };
+  user?: IUser;
 }
 
-export const protect = (
+export const protect = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
-  let token;
+  let token: string | undefined;
 
   if (
     req.headers.authorization &&
@@ -32,20 +30,39 @@ export const protect = (
 
   try {
     const decoded = jwt.verify(token, env.jwtSecret) as {
-  userId: string;
-  role: string;
-};
+      userId: string;
+    };
 
-req.user = {
-  id: decoded.userId,
-  role: decoded.role,
-};
+    const user = await User.findById(decoded.userId).select(
+      "-password -refreshToken"
+    );
 
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "User no longer exists",
+      });
+    }
+
+    req.user = user;
     next();
-  } catch (error) {
+  } catch (_error) {
     return res.status(401).json({
       success: false,
       message: "Invalid token",
     });
   }
+};
+
+export const authorizeRoles = (...roles: string[]) => {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to perform this action",
+      });
+    }
+
+    next();
+  };
 };
